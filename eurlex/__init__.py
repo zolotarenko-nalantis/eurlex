@@ -1,6 +1,7 @@
 import re
 import rdflib
 import requests
+import logging
 from SPARQLWrapper import SPARQLWrapper, JSON
 import pandas as pd
 import datetime
@@ -89,14 +90,14 @@ def prepend_prefixes(query: str) -> str:
     True
     """
     return (
-        "\n".join(
-            [
-                "prefix {}: <{}>".format(prefix, url)
-                for prefix, url in get_prefixes().items()
-            ]
-        )
-        + " "
-        + query
+            "\n".join(
+                [
+                    "prefix {}: <{}>".format(prefix, url)
+                    for prefix, url in get_prefixes().items()
+                ]
+            )
+            + " "
+            + query
     )
 
 
@@ -173,7 +174,7 @@ def get_celex_dataframe(celex_id: str) -> pd.DataFrame:
 
 
 def get_celex_id(
-    slash_notation: str, document_type: str = "R", sector_id: str = "3"
+        slash_notation: str, document_type: str = "R", sector_id: str = "3"
 ) -> str:
     """Derive the CELEX ID from a slash notation like 2019/947.
 
@@ -218,7 +219,7 @@ def get_celex_id(
 
 
 def get_possible_celex_ids(
-    slash_notation: str, document_type: str = None, sector_id: str = None
+        slash_notation: str, document_type: str = None, sector_id: str = None
 ) -> list:
     """Get a list of possible CELEX IDs (given a slash notation like 2019/947).
 
@@ -260,7 +261,7 @@ def get_possible_celex_ids(
 
 
 def guess_celex_ids_via_eurlex(
-    slash_notation: str, document_type: str = None, sector_id: str = None
+        slash_notation: str, document_type: str = None, sector_id: str = None
 ) -> list:
     """Guess CELEX IDs for a slash notation by looking it up via EUR-Lex.
 
@@ -317,19 +318,17 @@ def simplify_iri(iri: str) -> str:
     """
     for prefix, url in get_prefixes().items():
         if iri.startswith(url):
-            return prefix + ":" + iri[len(url) :]
+            return prefix + ":" + iri[len(url):]
     return iri
 
 
-def get_html_by_cellar_id(cellar_id: str, language: str = "en") -> str:
+def get_html_by_cellar_id(cellar_id: str) -> str:
     """Retrieve HTML by CELLAR ID.
 
     Parameters
     ----------
     cellar_id : str
         The CELLAR ID to find HTML for.
-    language : str
-        The language to retrieve the HTML in (default: "en").
 
     Returns
     -------
@@ -344,23 +343,20 @@ def get_html_by_cellar_id(cellar_id: str, language: str = "en") -> str:
         allow_redirects=True,
         headers={  # pragma: no cover
             "Accept": "text/html,application/xhtml+xml,application/xml",  # pragma: no cover
-            "Accept-Language": f"{language}",  # pragma: no cover
+            "Accept-Language": "en",  # pragma: no cover
         },
     )  # pragma: no cover
     html = response.content.decode("utf-8")  # pragma: no cover
     return html  # pragma: no cover
 
 
-def get_html_by_celex_id(celex_id: str, language: str = "en") -> str:
+def get_html_by_celex_id(celex_id: str) -> str:
     """Retrieve HTML by CELEX ID.
 
     Parameters
     ----------
     celex_id : str
         The CELEX ID to find HTML for.
-    language : str
-        The language to retrieve the HTML in (default: "en").
-
 
     Returns
     -------
@@ -375,9 +371,16 @@ def get_html_by_celex_id(celex_id: str, language: str = "en") -> str:
         allow_redirects=True,
         headers={  # pragma: no cover
             "Accept": "text/html,application/xhtml+xml,application/xml",  # pragma: no cover
-            "Accept-Language": f"{language}",  # pragma: no cover
+            "Accept-Language": "en",
+            'antibot': 'true',
+            'premium_proxy': 'true',
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36",
+            'referer': 'https://www.google.com/'
         },
-    )  # pragma: no cover
+    )
+    if response.status_code == 404:
+        logging.warning(f"Resource [system 'celex' - id '{celex_id}'] not found.")
+
     html = response.content.decode("utf-8")  # pragma: no cover
     return html  # pragma: no cover
 
@@ -404,7 +407,7 @@ def get_tag_name(raw_tag_name: str) -> str:
 
 
 def parse_modifiers(
-    child: ETree.Element, ref: list = None, context: dict = None
+        child: ETree.Element, ref: list = None, context: dict = None
 ) -> list:
     """Parse modifiers.
 
@@ -437,7 +440,7 @@ def parse_modifiers(
     context = {} if context is None else context
     output = []
     new_context = context.copy()
-    if child.attrib["class"] == "italic":
+    if child.attrib["class"] == "italic" or child.attrib["class"] == "oj-italic":
         output.append(
             {
                 "text": _get_text(child),
@@ -447,7 +450,7 @@ def parse_modifiers(
                 "context": new_context.copy(),
             }
         )
-    elif child.attrib["class"] == "signatory":
+    elif child.attrib["class"] == "signatory" or child.attrib["class"] == "oj-signatory":
         output.append(
             {
                 "text": _get_text(child),
@@ -457,7 +460,7 @@ def parse_modifiers(
                 "context": new_context.copy(),
             }
         )
-    elif child.attrib["class"] == "note":
+    elif child.attrib["class"] == "note" or child.attrib["class"] == "oj-note":
         output.append(
             {
                 "text": _get_text(child),
@@ -471,17 +474,17 @@ def parse_modifiers(
 
 
 def _get_text(child: ETree.Element) -> str:
-    """Get text.
+    """Get text from an XML element, including both text and tail content.
 
     Parameters
     ----------
     child : xml.etree.ElementTree.Element
-        XML tree.
+        XML tree element.
 
     Returns
     -------
     str
-        Text.
+        Concatenated text content.
 
     Examples
     --------
@@ -489,12 +492,25 @@ def _get_text(child: ETree.Element) -> str:
     'Text'
     >>> _get_text(ETree.fromstring('<p><span>Text</span></p>'))
     'Text'
+    >>> _get_text(ETree.fromstring('<p>Text1<span>Text2</span>Text3</p>'))
+    'Text1 Text2 Text3'
+    >>> _get_text(ETree.fromstring('<p>Text1<span>Text2</span><span>Text3</span></p>'))
+    'Text1 Text2 Text3'
     """
-    if len(child) == 1:
-        return _get_text(child[0])
-    if child.text is not None:
-        return child.text.strip()
-    return ""
+    text_parts = []
+
+    # Start with the element's own text, if present
+    if child.text:
+        text_parts.append(child.text.strip())
+
+    # Recursively add text from child elements and their tails
+    for elem in child:
+        text_parts.append(_get_text(elem))  # Recursively get text from child
+        if elem.tail:
+            text_parts.append(elem.tail.strip())  # Add the tail text if it exists
+
+    # Join all collected text parts with a space and return
+    return " ".join(filter(None, text_parts))
 
 
 def parse_span(child: ETree.Element, ref: list = None, context: dict = None) -> list:
@@ -540,7 +556,10 @@ def parse_span(child: ETree.Element, ref: list = None, context: dict = None) -> 
     output = []
     if "class" not in child.attrib:
         return output
-    if child.attrib["class"] == "doc-ti":
+    if (child.attrib["class"] == "doc-ti"
+            or child.attrib["class"] == "oj-doc-ti"
+            or child.attrib["class"] == "title-doc-first"
+            or child.attrib["class"] == "title-doc-last"):
         if "document" not in context:
             context["document"] = ""
         context["document"] += _get_text(child)
@@ -552,7 +571,9 @@ def parse_span(child: ETree.Element, ref: list = None, context: dict = None) -> 
                 "context": context.copy(),
             }
         )
-    elif child.attrib["class"] == "sti-art":
+    elif (child.attrib["class"] == "sti-art"
+          or child.attrib["class"] == 'oj-sti-art'
+          or child.attrib["class"] == 'stitle-article-norm'):
         context["article_subtitle"] = _get_text(child)
         output.append(
             {
@@ -562,7 +583,10 @@ def parse_span(child: ETree.Element, ref: list = None, context: dict = None) -> 
                 "context": context.copy(),
             }
         )
-    elif child.attrib["class"] == "ti-art":
+    elif (child.attrib["class"] == "ti-art"
+          or child.attrib["class"] == 'oj-ti-art'
+          or child.attrib["class"] == 'eli-subdivision'
+          or child.attrib["class"] == 'title-article-norm'):
         context["article"] = _get_text(child).replace("Article", "").strip()
         output.append(
             {
@@ -572,7 +596,7 @@ def parse_span(child: ETree.Element, ref: list = None, context: dict = None) -> 
                 "context": context.copy(),
             }
         )
-    elif child.attrib["class"].startswith("ti-grseq-"):
+    elif child.attrib["class"].startswith("ti-grseq-") or child.attrib["class"].startswith("oj-ti-grseq-"):
         output.append(
             {
                 "text": _get_text(child),
@@ -582,7 +606,9 @@ def parse_span(child: ETree.Element, ref: list = None, context: dict = None) -> 
             }
         )
         context["group"] = _get_text(child)
-    elif child.attrib["class"].startswith("ti-section-"):
+    elif (child.attrib["class"].startswith("ti-section-")
+          or child.attrib["class"].startswith("li")
+          or child.attrib["class"] == "oj-ti-section"):
         output.append(
             {
                 "text": _get_text(child),
@@ -592,7 +618,11 @@ def parse_span(child: ETree.Element, ref: list = None, context: dict = None) -> 
             }
         )
         context["section"] = _get_text(child)
-    elif child.attrib["class"] == "normal":
+    elif (child.attrib["class"] == "normal"
+          or child.attrib["class"] == "norm"
+          or child.attrib["class"] == "Normal"
+          or child.attrib["class"] == 'oj-normal'
+          or child.attrib["class"] == "norm inline-element"):
         text = _get_text(child)
         if re.match("^[0-9]+[.]", text):
             context["paragraph"] = text.split(".")[0]
@@ -602,6 +632,7 @@ def parse_span(child: ETree.Element, ref: list = None, context: dict = None) -> 
         )
     else:
         output.extend(parse_modifiers(child, ref, context))
+
     return output
 
 
@@ -659,9 +690,9 @@ def parse_article(tree: ETree.Element, ref: list = None, context: dict = None) -
                 "html:tbody/html:tr/html:td", namespaces=namespaces
             ) + child.findall("tbody/tr/td", namespaces=namespaces)
             if (
-                len(results) == 2
-                and len(results[0]) == 1
-                and get_tag_name(results[0][0].tag) == "p"
+                    len(results) == 2
+                    and len(results[0]) == 1
+                    and get_tag_name(results[0][0].tag) == "p"
             ):
                 key = None
                 for subchild in results[0]:
@@ -703,7 +734,12 @@ def parse_html(html: str) -> pd.DataFrame:
     [{'text': 'Text', 'type': 'text', 'ref': [], 'context': {'document': 'ANNEX', 'group': 'Group'}, 'document': 'ANNEX', 'group': 'Group'}]
     """
     try:
-        tree = ETree.fromstring(html)
+        cleaned_string = html.lstrip("\r\n")
+        tree = ETree.fromstring(cleaned_string)
+
+        # for child in tree.iter():
+        #     print(child.tag, child.text)
+
     except ETree.ParseError:
         return pd.DataFrame()
     records = []
@@ -712,7 +748,10 @@ def parse_html(html: str) -> pd.DataFrame:
             item[key] = value
         records.append(item)
     df = pd.DataFrame.from_records(records)
-    df = df[df.type == "text"] if "type" in df.columns else df
+    # df = df[df.type == "text"] if "type" in df.columns else df
+    # if "document" not in df.columns:
+    #     logging.warning("Df has no document column")
+    #     df = pd.DataFrame()
     return df
 
 
@@ -733,9 +772,9 @@ def get_regulations(limit: int = -1, shuffle: bool = False) -> list:
     """
     query = "select ?doc where {?doc cdm:work_has_resource-type <http://publications.europa.eu/"  # pragma: no cover
     query += (
-        "resource/authority/resource-type/REG_IMPL> . }"
-        + (" order by rand()" if shuffle else "")
-        + (" limit " + str(limit) if limit > 0 else "")
+            "resource/authority/resource-type/REG_IMPL> . }"
+            + (" order by rand()" if shuffle else "")
+            + (" limit " + str(limit) if limit > 0 else "")
     )  # pragma: no cover
     results = run_query(prepend_prefixes(query))  # pragma: no cover
     cellar_ids = []  # pragma: no cover
@@ -764,31 +803,25 @@ def get_documents(types: List[str] = ["REG"], limit: int = -1) -> List[Dict[str,
     query += "where{ ?doc cdm:work_has_resource-type ?type.\n"
     query += "  FILTER(\n    "
     query += " ||\n    ".join(
-        map(
-            lambda type: f"?type=<http://publications.europa.eu/resource/authority/resource-type/{type}>",
-            types,
-        )
-    )
+        map(lambda type: f"?type=<http://publications.europa.eu/resource/authority/resource-type/{type}>", types))
     query += "\n  )\n"
     query += "  FILTER(BOUND(?celex))\n"
     query += "  OPTIONAL{?doc cdm:resource_legal_id_celex ?celex.}\n"
     query += "  OPTIONAL{?doc cdm:work_date_document ?date.}\n"
     query += "}\n"
-    if limit > 0:
+    if (limit > 0):
         query += "limit " + str(limit)
 
     results = []
     query_results = run_query(prepend_prefixes(query))
 
     for result in query_results["results"]["bindings"]:
-        results.append(
-            {
-                "celex": result["celex"]["value"],
-                "date": result["date"]["value"],
-                "link": result["doc"]["value"],
-                "type": result["type"]["value"].split("/")[-1],
-            }
-        )
+        results.append({
+            "celex": result["celex"]["value"],
+            "date": result["date"]["value"],
+            "link": result["doc"]["value"],
+            "type": result["type"]["value"].split("/")[-1]
+        })
 
     return results
 
